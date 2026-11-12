@@ -4,10 +4,11 @@ using EcommerceWebApi.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 using System.IdentityModel.Tokens.Jwt;
+using System.Threading.Tasks;
 
 namespace EcommerceWebApi.Filters
 {
-    public class AuthorizeFilter : IAuthorizationFilter
+    public class AuthorizeFilter : IAsyncAuthorizationFilter
     {
         private readonly AuthService _authService;
         private readonly UserService _userService;
@@ -27,7 +28,7 @@ namespace EcommerceWebApi.Filters
             _logger = logger;
         }
 
-        public void OnAuthorization(AuthorizationFilterContext context)
+        public async Task OnAuthorizationAsync(AuthorizationFilterContext context)
         {
             try
             {
@@ -60,7 +61,7 @@ namespace EcommerceWebApi.Filters
 
                     if (string.IsNullOrEmpty(accessTokenString) && user != null)
                     {
-                        _ = _jwtService.GenerateJWT(
+                        await _jwtService.GenerateJWT(
                             user,
                             isSecondFactorChecked: true,
                             context.HttpContext
@@ -157,7 +158,7 @@ namespace EcommerceWebApi.Filters
 
                 user = _userService.GetUserByToken(token: refreshTokenString);
 
-                if (user == null || user.RefreshToken.Expires < DateTime.Now)
+                if (user == null || user.RefreshToken.Expires < DateTime.UtcNow)
                 {
                     context.Result = new ContentResult()
                     {

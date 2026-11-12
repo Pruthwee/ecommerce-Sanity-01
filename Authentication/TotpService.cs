@@ -1,5 +1,8 @@
 ﻿using OtpNet;
+using Polly;
+using Polly.Extensions.Http;
 using System.Globalization;
+using System.Net;
 using System.Web;
 
 namespace EcommerceWebApi.Authentication
@@ -71,14 +74,14 @@ namespace EcommerceWebApi.Authentication
             return false;
         }
 
-        public bool ValidateTotp(string? base32Secret, string totp)
+        public async Task<bool> ValidateTotp(string? base32Secret, string totp)
         {
             try
             {
                 var secret = Base32Encoding.ToBytes(base32Secret);
 
                 // Get exact time for TOTP
-                DateTime exactTime = GetNistTime();
+                DateTime exactTime = await GetNistTimeAsync();
 
                 // Validate TOTP
                 var correction = new TimeCorrection(exactTime);
@@ -104,13 +107,30 @@ namespace EcommerceWebApi.Authentication
             }
         }
 
-        public static DateTime GetNistTime()
+        private static IAsyncPolicy<HttpResponseMessage> GetRetryPolicy()
+        {
+            return HttpPolicyExtensions
+                .HandleTransientHttpError()
+                .Or<HttpRequestException>()
+                .OrResult(msg => msg.StatusCode == HttpStatusCode.ServiceUnavailable)
+                .OrResult(msg => (int)msg.StatusCode >= 500)
+                .WaitAndRetryAsync(
+                    retryCount: 3,
+                    sleepDurationProvider: retryAttempt =>
+                        TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))
+                        + TimeSpan.FromMilliseconds(new Random().Next(0, 500))
+                );
+        }
+
+        public static async Task<DateTime> GetNistTimeAsync()
         {
             // Get UTC time from the response header of request to "http://www.google.com"
             using var httpClient = new HttpClient();
+            var retryPolicy = GetRetryPolicy();
             try
             {
-                using var response = httpClient.GetAsync("http://www.google.com").Result;
+                using var response = await retryPolicy.ExecuteAsync(() =>
+                    httpClient.GetAsync("http://www.google.com"));
                 if (response.IsSuccessStatusCode && response.Headers.Date != null)
                 {
                     return DateTime.ParseExact(
